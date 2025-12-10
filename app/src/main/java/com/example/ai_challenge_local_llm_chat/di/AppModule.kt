@@ -1,17 +1,24 @@
 ﻿package com.example.ai_challenge_local_llm_chat.di
-
 import android.content.Context
 import androidx.room.Room
+import com.example.ai_challenge_local_llm_chat.BuildConfig
 import com.example.ai_challenge_local_llm_chat.core.llm.LlamaCppEngine
 import com.example.ai_challenge_local_llm_chat.core.llm.LocalLlmEngine
+import com.example.ai_challenge_local_llm_chat.core.remote.RemoteLlmConfig
 import com.example.ai_challenge_local_llm_chat.data.local.db.ChatDatabase
+import com.example.ai_challenge_local_llm_chat.data.remote.VpsLlmClient
 import com.example.ai_challenge_local_llm_chat.data.repository.ChatRepositoryImpl
+import com.example.ai_challenge_local_llm_chat.domain.model.ChatSessionType
 import com.example.ai_challenge_local_llm_chat.domain.repository.ChatRepository
 import com.example.ai_challenge_local_llm_chat.domain.usecase.ClearChatHistoryUseCase
 import com.example.ai_challenge_local_llm_chat.domain.usecase.EnsureModelReadyUseCase
 import com.example.ai_challenge_local_llm_chat.domain.usecase.GenerateModelResponseUseCase
+import com.example.ai_challenge_local_llm_chat.domain.usecase.GenerateRemoteModelResponseUseCase
 import com.example.ai_challenge_local_llm_chat.domain.usecase.ObserveChatMessagesUseCase
 import com.example.ai_challenge_local_llm_chat.domain.usecase.ShutdownLlmUseCase
+import com.example.ai_challenge_local_llm_chat.presentation.chat.ChatFeatureDependencies
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 
 class AppModule(context: Context) {
     private val appContext = context.applicationContext
@@ -22,12 +29,40 @@ class AppModule(context: Context) {
         "chat-messages.db"
     ).fallbackToDestructiveMigration().build()
 
-    private val repository: ChatRepository = ChatRepositoryImpl(database.chatMessageDao())
+    private val localRepository: ChatRepository =
+        ChatRepositoryImpl(database.chatMessageDao(), ChatSessionType.LOCAL)
+    private val vpsRepository: ChatRepository =
+        ChatRepositoryImpl(database.chatMessageDao(), ChatSessionType.VPS)
     private val llmEngine: LocalLlmEngine = LlamaCppEngine(appContext)
 
-    val observeChatMessagesUseCase = ObserveChatMessagesUseCase(repository)
-    val clearChatHistoryUseCase = ClearChatHistoryUseCase(repository)
-    val generateModelResponseUseCase = GenerateModelResponseUseCase(repository, llmEngine)
-    val ensureModelReadyUseCase = EnsureModelReadyUseCase(llmEngine)
-    val shutdownLlmUseCase = ShutdownLlmUseCase(llmEngine)
+    private val ensureLocalModelReadyUseCase = EnsureModelReadyUseCase(llmEngine)
+    private val shutdownLocalLlmUseCase = ShutdownLlmUseCase(llmEngine)
+
+    private val remoteConfig = RemoteLlmConfig(
+        baseUrl = BuildConfig.VPS_BASE_URL,
+        chatPath = BuildConfig.VPS_CHAT_PATH,
+        apiKey = BuildConfig.VPS_API_KEY,
+        model = BuildConfig.VPS_MODEL
+    )
+    private val remoteHttpClient: OkHttpClient = OkHttpClient.Builder()
+        .callTimeout(remoteConfig.requestTimeoutMs, TimeUnit.MILLISECONDS)
+        .connectTimeout(remoteConfig.requestTimeoutMs, TimeUnit.MILLISECONDS)
+        .readTimeout(remoteConfig.requestTimeoutMs, TimeUnit.MILLISECONDS)
+        .writeTimeout(remoteConfig.requestTimeoutMs, TimeUnit.MILLISECONDS)
+        .build()
+    private val remoteClient = VpsLlmClient(remoteHttpClient, remoteConfig)
+
+    val localChatDependencies = ChatFeatureDependencies(
+        observeChatMessagesUseCase = ObserveChatMessagesUseCase(localRepository),
+        responseGenerator = GenerateModelResponseUseCase(localRepository, llmEngine),
+        clearChatHistoryUseCase = ClearChatHistoryUseCase(localRepository),
+        ensureModelReady = { ensureLocalModelReadyUseCase() },
+        shutdownLlm = { shutdownLocalLlmUseCase() }
+    )
+
+    val vpsChatDependencies = ChatFeatureDependencies(
+        observeChatMessagesUseCase = ObserveChatMessagesUseCase(vpsRepository),
+        responseGenerator = GenerateRemoteModelResponseUseCase(vpsRepository, remoteClient),
+        clearChatHistoryUseCase = ClearChatHistoryUseCase(vpsRepository)
+    )
 }

@@ -13,5 +13,7 @@ data class ChatMessageEntity(
     @ColumnInfo(name = "content")
     val content: String,
     @ColumnInfo(name = "timestamp")
-    val timestamp: Long
+    val timestamp: Long,
+    @ColumnInfo(name = "chat_type")
+    val chatType: String
 )
