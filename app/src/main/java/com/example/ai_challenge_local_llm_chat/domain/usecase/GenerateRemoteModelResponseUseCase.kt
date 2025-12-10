@@ -1,17 +1,16 @@
-﻿package com.example.ai_challenge_local_llm_chat.domain.usecase
+package com.example.ai_challenge_local_llm_chat.domain.usecase
 
-import com.example.ai_challenge_local_llm_chat.core.llm.LocalLlmEngine
+import com.example.ai_challenge_local_llm_chat.core.remote.RemoteLlmClient
 import com.example.ai_challenge_local_llm_chat.domain.model.ChatMessage
 import com.example.ai_challenge_local_llm_chat.domain.model.MessageRole
 import com.example.ai_challenge_local_llm_chat.domain.repository.ChatRepository
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
 
-class GenerateModelResponseUseCase(
+class GenerateRemoteModelResponseUseCase(
     private val repository: ChatRepository,
-    private val engine: LocalLlmEngine,
-    private val fallbackReply: String = "Мне не удалось получить ответ. Попробуйте еще раз."
+    private val remoteClient: RemoteLlmClient,
+    private val fallbackReply: String = "Удалённая модель не ответила. Попробуйте позже."
 ) : ChatResponseGenerator {
 
     override operator fun invoke(userInput: String): Flow<ChatResponseEvent> = flow {
@@ -30,16 +29,11 @@ class GenerateModelResponseUseCase(
         emit(ChatResponseEvent.Started)
 
         val history = repository.getMessagesSnapshot()
-        val responseBuilder = StringBuilder()
+        val reply = remoteClient.requestCompletion(history)
 
-        engine.streamResponse(history).collect { chunk ->
-            if (chunk.isNotEmpty()) {
-                responseBuilder.append(chunk)
-                emit(ChatResponseEvent.Chunk(responseBuilder.toString()))
-            }
-        }
+        emit(ChatResponseEvent.Chunk(reply))
 
-        val finalReply = responseBuilder.toString().ifBlank { fallbackReply }
+        val finalReply = reply.ifBlank { fallbackReply }
         repository.insertMessage(
             ChatMessage(
                 role = MessageRole.MODEL,

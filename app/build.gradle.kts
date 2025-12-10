@@ -1,3 +1,18 @@
+import java.util.Properties
+
+val localProps = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) {
+        file.inputStream().use { load(it) }
+    }
+}
+
+fun localProperty(key: String, defaultValue: String = ""): String =
+    localProps.getProperty(key, defaultValue)
+
+fun buildConfigString(value: String): String =
+    "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -9,6 +24,11 @@ android {
     namespace = "com.example.ai_challenge_local_llm_chat"
     compileSdk = 36
     ndkVersion = "29.0.14206865"
+
+    val vpsBaseUrl = localProperty("vps.baseUrl")
+    val vpsChatPath = localProperty("vps.chatPath", "/v1/chat/completions")
+    val vpsApiKey = localProperty("vps.apiKey")
+    val vpsModel = localProperty("vps.model", "qwen2.5:1.5b")
 
     defaultConfig {
         applicationId = "com.example.ai_challenge_local_llm_chat"
@@ -25,6 +45,10 @@ android {
                 cppFlags += listOf("-std=c++17")
             }
         }
+        buildConfigField("String", "VPS_BASE_URL", buildConfigString(vpsBaseUrl))
+        buildConfigField("String", "VPS_CHAT_PATH", buildConfigString(vpsChatPath))
+        buildConfigField("String", "VPS_API_KEY", buildConfigString(vpsApiKey))
+        buildConfigField("String", "VPS_MODEL", buildConfigString(vpsModel))
     }
 
     buildTypes {
@@ -76,6 +100,7 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.okhttp)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)

@@ -11,9 +11,10 @@ fun ChatMessageEntity.toDomain(): ChatMessage = ChatMessage(
     timestamp = timestamp
 )
 
-fun ChatMessage.toEntity(): ChatMessageEntity = ChatMessageEntity(
+fun ChatMessage.toEntity(chatType: String): ChatMessageEntity = ChatMessageEntity(
     id = id,
     role = role.name,
     content = content,
-    timestamp = timestamp
+    timestamp = timestamp,
+    chatType = chatType
 )

@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.CircularProgressIndicator
@@ -30,7 +31,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -42,23 +45,64 @@ import com.example.ai_challenge_local_llm_chat.domain.model.MessageRole
 
 @Composable
 fun ChatApp(appModule: AppModule) {
-    val factory = remember(appModule) {
-        ChatViewModelFactory(
-            appModule.observeChatMessagesUseCase,
-            appModule.generateModelResponseUseCase,
-            appModule.clearChatHistoryUseCase,
-            appModule.ensureModelReadyUseCase,
-            appModule.shutdownLlmUseCase
-        )
+    var destination by remember { mutableStateOf(ChatDestination.Selection) }
+
+    when (destination) {
+        ChatDestination.Selection -> {
+            ChatSelectionScreen(
+                onLocalClick = { destination = ChatDestination.Local },
+                onVpsClick = { destination = ChatDestination.Vps }
+            )
+        }
+
+        ChatDestination.Local -> {
+            ChatFeatureHost(
+                key = "local_chat_view_model",
+                dependencies = appModule.localChatDependencies,
+                title = "Local LLM Chat",
+                emptyStateMessage = "Начните диалог с локальной моделью",
+                onNavigateBack = { destination = ChatDestination.Selection }
+            )
+        }
+
+        ChatDestination.Vps -> {
+            ChatFeatureHost(
+                key = "vps_chat_view_model",
+                dependencies = appModule.vpsChatDependencies,
+                title = "VPS LLM Chat",
+                emptyStateMessage = "Подключитесь к VPS, чтобы начать диалог",
+                onNavigateBack = { destination = ChatDestination.Selection }
+            )
+        }
     }
-    val chatViewModel: ChatViewModel = viewModel(factory = factory)
+}
+
+private enum class ChatDestination {
+    Selection,
+    Local,
+    Vps
+}
+
+@Composable
+private fun ChatFeatureHost(
+    key: String,
+    dependencies: ChatFeatureDependencies,
+    title: String,
+    emptyStateMessage: String,
+    onNavigateBack: (() -> Unit)?
+) {
+    val factory = remember(dependencies) { ChatViewModelFactory(dependencies) }
+    val chatViewModel: ChatViewModel = viewModel(factory = factory, key = key)
     val uiState by chatViewModel.uiState.collectAsStateWithLifecycle()
 
     ChatScreen(
         state = uiState,
         onInputChanged = chatViewModel::onInputChanged,
         onSendMessage = chatViewModel::onSendMessage,
-        onClearHistory = chatViewModel::onClearChat
+        onClearHistory = chatViewModel::onClearChat,
+        title = title,
+        emptyStateMessage = emptyStateMessage,
+        onNavigateBack = onNavigateBack
     )
 }
 
@@ -68,7 +112,10 @@ fun ChatScreen(
     state: ChatUiState,
     onInputChanged: (String) -> Unit,
     onSendMessage: () -> Unit,
-    onClearHistory: () -> Unit
+    onClearHistory: () -> Unit,
+    title: String,
+    emptyStateMessage: String,
+    onNavigateBack: (() -> Unit)? = null
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val lazyListState = rememberLazyListState()
@@ -104,7 +151,17 @@ fun ChatScreen(
         modifier = Modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text(text = "Local LLM Chat") },
+                title = { Text(text = title) },
+                navigationIcon = {
+                    if (onNavigateBack != null) {
+                        IconButton(onClick = onNavigateBack) {
+                            Icon(
+                                imageVector = Icons.Default.ArrowBack,
+                                contentDescription = "Назад"
+                            )
+                        }
+                    }
+                },
                 actions = {
                     if (state.isGenerating) {
                         CircularProgressIndicator(
@@ -131,7 +188,10 @@ fun ChatScreen(
                 .padding(innerPadding)
         ) {
             if (messages.isEmpty() && !state.isGenerating) {
-                EmptyStateMessage(modifier = Modifier.weight(1f))
+                EmptyStateMessage(
+                    modifier = Modifier.weight(1f),
+                    message = emptyStateMessage
+                )
             } else {
                 LazyColumn(
                     modifier = Modifier
@@ -158,13 +218,16 @@ fun ChatScreen(
 }
 
 @Composable
-private fun EmptyStateMessage(modifier: Modifier = Modifier) {
+private fun EmptyStateMessage(
+    modifier: Modifier = Modifier,
+    message: String
+) {
     Box(
         modifier = modifier.fillMaxWidth(),
         contentAlignment = Alignment.Center
     ) {
         Text(
-            text = "Начните диалог с локальной моделью",
+            text = message,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,

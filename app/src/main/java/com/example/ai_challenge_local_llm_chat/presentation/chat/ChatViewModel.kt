@@ -4,11 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ai_challenge_local_llm_chat.domain.model.ChatMessage
 import com.example.ai_challenge_local_llm_chat.domain.model.MessageRole
+import com.example.ai_challenge_local_llm_chat.domain.usecase.ChatResponseEvent
+import com.example.ai_challenge_local_llm_chat.domain.usecase.ChatResponseGenerator
 import com.example.ai_challenge_local_llm_chat.domain.usecase.ClearChatHistoryUseCase
-import com.example.ai_challenge_local_llm_chat.domain.usecase.EnsureModelReadyUseCase
-import com.example.ai_challenge_local_llm_chat.domain.usecase.GenerateModelResponseUseCase
 import com.example.ai_challenge_local_llm_chat.domain.usecase.ObserveChatMessagesUseCase
-import com.example.ai_challenge_local_llm_chat.domain.usecase.ShutdownLlmUseCase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -17,23 +16,22 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class ChatViewModel(
     private val observeChatMessagesUseCase: ObserveChatMessagesUseCase,
-    private val generateModelResponseUseCase: GenerateModelResponseUseCase,
+    private val responseGenerator: ChatResponseGenerator,
     private val clearChatHistoryUseCase: ClearChatHistoryUseCase,
-    private val ensureModelReadyUseCase: EnsureModelReadyUseCase,
-    private val shutdownLlmUseCase: ShutdownLlmUseCase
+    private val ensureModelReadyAction: (suspend () -> Unit)?,
+    private val shutdownLlmAction: (suspend () -> Unit)?
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
-    private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val cleanupScope = shutdownLlmAction?.let { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
 
     init {
         observeHistory()
@@ -52,8 +50,9 @@ class ChatViewModel(
     }
 
     private fun preloadModel() {
+        val ensureAction = ensureModelReadyAction ?: return
         viewModelScope.launch {
-            runCatching { ensureModelReadyUseCase() }
+            runCatching { ensureAction() }
                 .onFailure { throwable ->
                     _uiState.update { state ->
                         state.copy(errorMessage = throwable.message)
@@ -71,7 +70,7 @@ class ChatViewModel(
         if (message.isEmpty() || uiState.value.isGenerating) return
 
         viewModelScope.launch {
-            generateModelResponseUseCase(message)
+            responseGenerator(message)
                 .onStart {
                     _uiState.update { it.copy(isGenerating = true, streamingResponse = "", inputText = "", errorMessage = null) }
                 }
@@ -86,11 +85,11 @@ class ChatViewModel(
                 }
                 .collect { event ->
                     when (event) {
-                        GenerateModelResponseUseCase.Event.Started -> Unit
-                        is GenerateModelResponseUseCase.Event.Chunk -> _uiState.update {
+                        ChatResponseEvent.Started -> Unit
+                        is ChatResponseEvent.Chunk -> _uiState.update {
                             it.copy(streamingResponse = event.content)
                         }
-                        is GenerateModelResponseUseCase.Event.Success -> _uiState.update {
+                        is ChatResponseEvent.Success -> _uiState.update {
                             it.copy(
                                 isGenerating = false,
                                 streamingResponse = null,
@@ -112,10 +111,15 @@ class ChatViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        cleanupScope.launch {
-            shutdownLlmUseCase()
+        val scope = cleanupScope ?: return
+        val action = shutdownLlmAction ?: run {
+            scope.cancel()
+            return
+        }
+        scope.launch {
+            action()
         }.invokeOnCompletion {
-            cleanupScope.cancel()
+            scope.cancel()
         }
     }
 
