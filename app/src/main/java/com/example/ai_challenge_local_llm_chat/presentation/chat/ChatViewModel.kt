@@ -2,8 +2,6 @@
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.ai_challenge_local_llm_chat.domain.model.ChatMessage
-import com.example.ai_challenge_local_llm_chat.domain.model.MessageRole
 import com.example.ai_challenge_local_llm_chat.domain.usecase.ChatResponseEvent
 import com.example.ai_challenge_local_llm_chat.domain.usecase.ChatResponseGenerator
 import com.example.ai_challenge_local_llm_chat.domain.usecase.ClearChatHistoryUseCase
@@ -122,11 +120,4 @@ class ChatViewModel(
             scope.cancel()
         }
     }
-
-    private fun ChatMessage.toUiModel(): ChatMessageUi = ChatMessageUi(
-        id = id,
-        role = role,
-        text = content,
-        timestamp = timestamp
-    )
 }

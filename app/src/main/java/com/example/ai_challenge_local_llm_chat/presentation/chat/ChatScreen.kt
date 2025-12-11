@@ -1,5 +1,6 @@
 ﻿package com.example.ai_challenge_local_llm_chat.presentation.chat
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -42,16 +44,27 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ai_challenge_local_llm_chat.di.AppModule
 import com.example.ai_challenge_local_llm_chat.domain.model.MessageRole
+import com.example.ai_challenge_local_llm_chat.presentation.chat.vps.VpsChatHost
+import com.example.ai_challenge_local_llm_chat.presentation.chat.vps.VpsConversationListHost
 
 @Composable
 fun ChatApp(appModule: AppModule) {
-    var destination by remember { mutableStateOf(ChatDestination.Selection) }
+    var destination: ChatDestination by remember { mutableStateOf<ChatDestination>(ChatDestination.Selection) }
 
-    when (destination) {
+    BackHandler(enabled = destination != ChatDestination.Selection) {
+        destination = when (destination) {
+            ChatDestination.Selection -> ChatDestination.Selection
+            ChatDestination.Local -> ChatDestination.Selection
+            ChatDestination.VpsList -> ChatDestination.Selection
+            is ChatDestination.VpsChat -> ChatDestination.VpsList
+        }
+    }
+
+    when (val target = destination) {
         ChatDestination.Selection -> {
             ChatSelectionScreen(
                 onLocalClick = { destination = ChatDestination.Local },
-                onVpsClick = { destination = ChatDestination.Vps }
+                onVpsClick = { destination = ChatDestination.VpsList }
             )
         }
 
@@ -65,22 +78,30 @@ fun ChatApp(appModule: AppModule) {
             )
         }
 
-        ChatDestination.Vps -> {
-            ChatFeatureHost(
-                key = "vps_chat_view_model",
-                dependencies = appModule.vpsChatDependencies,
-                title = "VPS LLM Chat",
-                emptyStateMessage = "Подключитесь к VPS, чтобы начать диалог",
+        ChatDestination.VpsList -> {
+            VpsConversationListHost(
+                dependencies = appModule.vpsConversationDependencies,
+                onNewChat = { destination = ChatDestination.VpsChat(null) },
+                onSelectConversation = { id -> destination = ChatDestination.VpsChat(id) },
                 onNavigateBack = { destination = ChatDestination.Selection }
+            )
+        }
+
+        is ChatDestination.VpsChat -> {
+            VpsChatHost(
+                conversationId = target.conversationId,
+                dependencies = appModule.vpsChatDependencies,
+                onNavigateBack = { destination = ChatDestination.VpsList }
             )
         }
     }
 }
 
-private enum class ChatDestination {
-    Selection,
-    Local,
-    Vps
+private sealed interface ChatDestination {
+    data object Selection : ChatDestination
+    data object Local : ChatDestination
+    data object VpsList : ChatDestination
+    data class VpsChat(val conversationId: String?) : ChatDestination
 }
 
 @Composable
@@ -112,15 +133,17 @@ fun ChatScreen(
     state: ChatUiState,
     onInputChanged: (String) -> Unit,
     onSendMessage: () -> Unit,
-    onClearHistory: () -> Unit,
+    onClearHistory: (() -> Unit)? = null,
+    onOpenSettings: (() -> Unit)? = null,
     title: String,
     emptyStateMessage: String,
-    onNavigateBack: (() -> Unit)? = null
+    onNavigateBack: (() -> Unit)? = null,
+    isHistoryLoading: Boolean = false
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val lazyListState = rememberLazyListState()
 
-    val streamingMessage = state.streamingResponse?.takeIf { it.isNotEmpty() }?.let {
+    val streamingMessage = state.streamingResponse?.let {
         ChatMessageUi(
             id = Long.MAX_VALUE,
             role = MessageRole.MODEL,
@@ -133,6 +156,8 @@ fun ChatScreen(
     val messages = remember(state.messages, streamingMessage) {
         if (streamingMessage != null) state.messages + streamingMessage else state.messages
     }
+
+    val isInteractionBlocked = state.isGenerating || isHistoryLoading
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
@@ -163,7 +188,7 @@ fun ChatScreen(
                     }
                 },
                 actions = {
-                    if (state.isGenerating) {
+                    if (isInteractionBlocked) {
                         CircularProgressIndicator(
                             modifier = Modifier
                                 .padding(end = 16.dp)
@@ -171,13 +196,24 @@ fun ChatScreen(
                             strokeWidth = 2.dp
                         )
                     }
-                    IconButton(onClick = onClearHistory, enabled = !state.isGenerating) {
-                        Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = "Очистить историю"
-                        )
+                    if (onOpenSettings != null) {
+                        IconButton(onClick = onOpenSettings, enabled = !isInteractionBlocked) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Открыть настройки"
+                            )
+                        }
+                    }
+                    if (onClearHistory != null) {
+                        IconButton(onClick = onClearHistory, enabled = !isInteractionBlocked) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Очистить историю"
+                            )
+                        }
                     }
                 }
+
             )
         },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
@@ -187,22 +223,30 @@ fun ChatScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            if (messages.isEmpty() && !state.isGenerating) {
-                EmptyStateMessage(
-                    modifier = Modifier.weight(1f),
-                    message = emptyStateMessage
-                )
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    state = lazyListState,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)
-                ) {
-                    items(items = messages, key = { it.id }) { message ->
-                        MessageBubble(message = message)
+            when {
+                isHistoryLoading && messages.isEmpty() -> {
+                    LoadingStateMessage(
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                messages.isEmpty() && !state.isGenerating -> {
+                    EmptyStateMessage(
+                        modifier = Modifier.weight(1f),
+                        message = emptyStateMessage
+                    )
+                }
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        state = lazyListState,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)
+                    ) {
+                        items(items = messages, key = { it.id }) { message ->
+                            MessageBubble(message = message)
+                        }
                     }
                 }
             }
@@ -211,7 +255,7 @@ fun ChatScreen(
                 text = state.inputText,
                 onValueChange = onInputChanged,
                 onSend = onSendMessage,
-                isSendingAllowed = !state.isGenerating
+                isSendingAllowed = !isInteractionBlocked
             )
         }
     }
@@ -304,3 +348,40 @@ private fun ChatInput(
         }
     }
 }
+
+
+
+
+
+
+
+
+
+@Composable
+private fun LoadingStateMessage(
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator()
+            Text(
+                text = "Загружаем историю...",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 12.dp)
+            )
+        }
+    }
+}
+
+
+
+
+
+
+
+
+

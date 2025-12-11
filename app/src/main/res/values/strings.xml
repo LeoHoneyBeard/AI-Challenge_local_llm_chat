@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">AI-Challenge_local_llm_chat</string>
+    <string name="vps_chat_title">VPS чат</string>
+    <string name="vps_chat_empty_state">Начните новый диалог или выберите сохраненный</string>
 </resources>
