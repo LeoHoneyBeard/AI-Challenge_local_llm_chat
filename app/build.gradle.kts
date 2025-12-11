@@ -26,7 +26,9 @@ android {
     ndkVersion = "29.0.14206865"
 
     val vpsBaseUrl = localProperty("vps.baseUrl")
-    val vpsChatPath = localProperty("vps.chatPath", "/v1/chat/completions")
+    val vpsChatPath = localProperty("vps.chatPath", "/chat")
+    val vpsHistoryPath = localProperty("vps.historyPath", "/history")
+    val vpsModelsPath = localProperty("vps.modelsPath", "/models")
     val vpsApiKey = localProperty("vps.apiKey")
     val vpsModel = localProperty("vps.model", "qwen2.5:1.5b")
 
@@ -47,6 +49,8 @@ android {
         }
         buildConfigField("String", "VPS_BASE_URL", buildConfigString(vpsBaseUrl))
         buildConfigField("String", "VPS_CHAT_PATH", buildConfigString(vpsChatPath))
+        buildConfigField("String", "VPS_HISTORY_PATH", buildConfigString(vpsHistoryPath))
+        buildConfigField("String", "VPS_MODELS_PATH", buildConfigString(vpsModelsPath))
         buildConfigField("String", "VPS_API_KEY", buildConfigString(vpsApiKey))
         buildConfigField("String", "VPS_MODEL", buildConfigString(vpsModel))
     }
@@ -112,3 +116,7 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 }
+
+
+
+
